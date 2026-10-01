@@ -1,0 +1,52 @@
+[tool.black]
+line-length = 240
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cambrian"
+version = "1.7.0+gaze"
+description = "Gaze Attention: Query-Adaptive Visual Routing for Efficient Multimodal LLMs (built on LLaVA-OneVision)"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+]
+# Core dependencies (inference). Install PyTorch first, see README.md.
+dependencies = [
+    "transformers==4.51.0",
+    "tokenizers~=0.21.1",
+    "accelerate>=1.1.0,<=1.12.0",
+    "huggingface_hub>=0.30.0,<1.0",
+    "safetensors",
+    "numpy==1.26.4",
+    "pillow",
+    "sentencepiece",
+    "protobuf",
+    "pyyaml",
+    "requests",
+    "tqdm",
+    "decord",
+    "opencv-python-headless",
+]
+
+[project.optional-dependencies]
+train = [
+    "deepspeed==0.14.4",
+    "pydantic<2",
+    "wandb",
+]
+eval = [
+    "datasets==2.21.0",
+    "shortuuid",
+    "pandas",
+    "openpyxl",
+    "mmh3",
+    "nltk",
+]
+
+[tool.setuptools.packages.find]
+include = ["cambrian*"]

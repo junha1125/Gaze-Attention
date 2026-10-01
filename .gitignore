@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.ipynb_checkpoints/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Training outputs
+checkpoints/
+wandb/
+logs/
+*.log
+
+# Local datasets
+datasets/
+
+# Evaluation outputs (eval/)
+eval/datasets_eval/
+eval/progress/
+eval/eval/*/answers/
+eval/eval/*/incorrect/
+eval/eval/*/experiments.csv
+eval/eval/*/*.xlsx
+eval/all_results.csv
+eval/pivot.xlsx
+
+# lmms-eval checkout and its outputs
+third_party/
+eval/eval/*/*_submission_url.txt

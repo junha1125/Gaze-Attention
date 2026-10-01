@@ -1,0 +1,154 @@
+diff --git a/lmms_eval/models/simple/llava_onevision.py b/lmms_eval/models/simple/llava_onevision.py
+index 93d6fc6b..f5907a57 100644
+--- a/lmms_eval/models/simple/llava_onevision.py
++++ b/lmms_eval/models/simple/llava_onevision.py
+@@ -1,6 +1,7 @@
+ import copy
+ import json
+ import logging
++import re
+ import warnings
+ from datetime import timedelta
+ from typing import List, Optional, Tuple, Union
+@@ -32,21 +33,21 @@ torch.backends.cuda.matmul.allow_tf32 = True
+ 
+ # Import LLaVA modules
+ try:
+-    from llava.constants import (
++    from cambrian.constants import (
+         DEFAULT_IM_END_TOKEN,
+         DEFAULT_IM_START_TOKEN,
+         DEFAULT_IMAGE_TOKEN,
+         IGNORE_INDEX,
+         IMAGE_TOKEN_INDEX,
+     )
+-    from llava.conversation import SeparatorStyle, conv_templates
+-    from llava.mm_utils import (
++    from cambrian.conversation import SeparatorStyle, conv_templates
++    from cambrian.mm_utils import (
+         KeywordsStoppingCriteria,
+         get_model_name_from_path,
+         process_images,
+         tokenizer_image_token,
+     )
+-    from llava.model.builder import load_pretrained_model
++    from cambrian.model.builder import load_pretrained_model
+ except ImportError as e:
+     eval_logger.debug(f"LLaVA is not installed. Please install LLaVA to use this model.\nError: {e}")
+ 
+@@ -82,6 +83,8 @@ class Llava_OneVision(lmms):
+         mm_spatial_pool_mode: Optional[str] = "bilinear",
+         token_strategy: Optional[str] = "single",  # could be "single" or "multiple", "multiple" denotes adding multiple <image> tokens for each frame
+         video_decode_backend: str = "decord",
++        gaze_topk_ratio: Optional[float] = None,  # Gaze Attention: fraction of gaze regions attended per query (None = value stored in the checkpoint)
++        model_max_length: Optional[int] = None,  # maximum number of input tokens incl. visual tokens (None = value stored in the checkpoint)
+         **kwargs,
+     ) -> None:
+         super().__init__()
+@@ -121,6 +124,10 @@ class Llava_OneVision(lmms):
+         overwrite_config = {}
+         overwrite_config["mm_spatial_pool_stride"] = self.mm_spatial_pool_stride
+         overwrite_config["mm_spatial_pool_mode"] = self.mm_spatial_pool_mode
++        if gaze_topk_ratio is not None:
++            overwrite_config["gaze_topk_ratio"] = float(gaze_topk_ratio)
++        if model_max_length is not None:
++            overwrite_config["tokenizer_model_max_length"] = int(model_max_length)
+         cfg_pretrained = AutoConfig.from_pretrained(self.pretrained)
+ 
+         llava_model_args["overwrite_config"] = overwrite_config
+@@ -590,7 +597,8 @@ class Llava_OneVision(lmms):
+             except Exception as e:
+                 raise e
+ 
+-            text_outputs = [response.strip() for response in text_outputs]
++            # Strip Qwen3 thinking content: <think>...</think>
++            text_outputs = [re.sub(r"<think>.*?</think>\s*", "", response, flags=re.DOTALL).strip() for response in text_outputs]
+             res.extend(text_outputs)
+             self.cache_hook.add_partial("generate_until", (context, gen_kwargs), text_outputs)
+             pbar.update(1)
+diff --git a/lmms_eval/tasks/longvideobench/utils.py b/lmms_eval/tasks/longvideobench/utils.py
+index c05b853d..a4805d12 100644
+--- a/lmms_eval/tasks/longvideobench/utils.py
++++ b/lmms_eval/tasks/longvideobench/utils.py
+@@ -7,7 +7,7 @@ from pathlib import Path
+ 
+ import torch
+ import yaml
+-from decord import cpu
++from decord import VideoReader, cpu
+ from loguru import logger as eval_logger
+ from PIL import Image
+ 
+diff --git a/lmms_eval/tasks/tempcompass/utils.py b/lmms_eval/tasks/tempcompass/utils.py
+index 217d15a8..151c4dfc 100644
+--- a/lmms_eval/tasks/tempcompass/utils.py
++++ b/lmms_eval/tasks/tempcompass/utils.py
+@@ -7,6 +7,7 @@ from pathlib import Path
+ 
+ import requests
+ import yaml
++from loguru import logger as eval_logger
+ 
+ with open(Path(__file__).parent / "_default_template_yaml", "r") as f:
+     raw_data = f.readlines()
+@@ -20,10 +21,14 @@ with open(Path(__file__).parent / "_default_template_yaml", "r") as f:
+ 
+ 
+ API_TYPE = os.getenv("API_TYPE", "openai")
++NO_API_KEY = False
+ 
+ if API_TYPE == "openai":
+     API_URL = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions")
+-    API_KEY = os.getenv("OPENAI_API_KEY", "YOUR_API_KEY")
++    API_KEY = os.getenv("OPENAI_API_KEY", "")
++    if not API_KEY:
++        NO_API_KEY = True
++        eval_logger.warning("OPENAI_API_KEY not set. GPT fallback evaluation will be skipped (scored as 0).")
+     headers = {
+         "Authorization": f"Bearer {API_KEY}",
+         "Content-Type": "application/json",
+@@ -407,6 +412,8 @@ def get_llm_output_for_captioning(prompt):
+ 
+ # utils functions for captioning: consolidate and return gpt outputs
+ def get_eval_result_for_captioning(prompt, mc_answer, maxtry=10):
++    if NO_API_KEY:
++        return {"chatgpt-reasoning": None, "chatgpt-answer": None, "rating": -1, "token_count": None}
+     while True:
+         try:
+             llm_output, token_count = get_llm_output_for_captioning(prompt)
+@@ -459,6 +466,8 @@ def extract_pred(video_llm_output):
+ 
+ # utils function for gpt_evaluation when rule-based matching is unsuccessful
+ def get_eval_result(prompt, maxtry=10, sys_prompt=None):
++    if NO_API_KEY:
++        return None, 0
+     llm_output = None
+     while True:
+         try:
+diff --git a/lmms_eval/tasks/videomme/utils.py b/lmms_eval/tasks/videomme/utils.py
+index c9428b83..57d5549d 100644
+--- a/lmms_eval/tasks/videomme/utils.py
++++ b/lmms_eval/tasks/videomme/utils.py
+@@ -4,7 +4,6 @@ import sys
+ from functools import partial
+ from pathlib import Path
+ 
+-import cv2
+ import datasets
+ import numpy as np
+ import yaml
+@@ -114,9 +113,11 @@ def convert_time_to_frame(time_in_seconds, fps):
+ 
+ 
+ def extract_subtitles(video_path, subtitle_path):
+-    video = cv2.VideoCapture(video_path)
+-    fps = video.get(cv2.CAP_PROP_FPS)
+-    total_frame = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
++    from decord import VideoReader
++
++    vr = VideoReader(video_path)
++    fps = vr.get_avg_fps()
++    total_frame = len(vr)
+     subtitles = load_subtitles(subtitle_path)
+ 
+     subtitle_frames = []

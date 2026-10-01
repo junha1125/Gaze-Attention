@@ -1,0 +1,2 @@
+from .language_model.cambrian_qwen import CambrianQwenForCausalLM, CambrianQwenConfig
+from .language_model.cambrian_qwen3 import CambrianQwen3ForCausalLM, CambrianQwen3Config
